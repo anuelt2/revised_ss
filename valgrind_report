@@ -1,0 +1,75 @@
+The Valgrind output you provided includes several types of errors that suggest issues with memory handling in your custom shell implementation. I'll break down each part of the output and explain what it means.
+
+### **1. Uninitialized Memory Usage**
+Valgrind is reporting that uninitialized memory is being accessed when you use system calls like `access()`, `fstatat()`, and `execve()`.
+
+- **Syscall `access` points to uninitialized byte(s):**
+  ```plaintext
+  ==13456== Syscall param faccessat(pathname) points to uninitialised byte(s)
+  ==13456==    at 0x499C24C: access (access.c:29)
+  ==13456==    by 0x10B263: find_ext_file (in /home/anuel/dev/revised_ss/simple_shell/shell)
+  ```
+  This means that when `access()` is called to check the existence or permissions of a file, it is being passed a pointer (`pathname`) that points to memory that has not been properly initialized. 
+
+- **Syscall `fstatat` points to uninitialized byte(s):**
+  ```plaintext
+  ==13456== Syscall param fstatat(file_name) points to uninitialised byte(s)
+  ==13456==    at 0x499D1C8: fstatat (fstatat64.c:161)
+  ==13456==    by 0x10B123: is_executable (in /home/anuel/dev/revised_ss/simple_shell/shell)
+  ```
+  Similarly, the `fstatat()` system call is being passed an uninitialized file name, which causes it to behave unpredictably.
+
+- **Syscall `execve` points to uninitialized byte(s):**
+  ```plaintext
+  ==13457== Syscall param execve(filename) points to uninitialised byte(s)
+  ==13457==    at 0x497DE0C: execve (syscall-template.S:120)
+  ==13457==    by 0x109CAF: exec_external (in /home/anuel/dev/revised_ss/simple_shell/shell)
+  ```
+  This indicates that the `execve()` system call is being passed a filename or arguments that include uninitialized data.
+
+**Explanation:** These errors typically happen when you allocate memory for strings (e.g., filenames or command arguments) but do not initialize that memory properly before using it. In C, `malloc()` allocates memory but does not initialize it; if you use that memory without setting it explicitly (e.g., using `strcpy`, `strncpy`, or `memset`), it can contain garbage data.
+
+**Solution:**
+- Make sure any allocated memory is properly initialized before it's used.
+- When constructing strings, ensure all buffers are null-terminated.
+- Consider using `calloc()` instead of `malloc()` for allocating memory if you want it to be zero-initialized.
+
+### **2. Double Free Error**
+Valgrind reports a double-free error, which occurs when you attempt to `free()` the same block of memory more than once.
+
+- **Invalid free() / delete / delete[] / realloc():**
+  ```plaintext
+  ==13456== Invalid free() / delete / delete[] / realloc()
+  ==13456==    at 0x48882A8: free (in /usr/libexec/valgrind/vgpreload_memcheck-arm64-linux.so)
+  ==13456==    by 0x10A8BF: free_resources (in /home/anuel/dev/revised_ss/simple_shell/shell)
+  ```
+  This indicates that the program attempts to `free()` memory that has already been freed, causing undefined behavior.
+
+- **Block was alloc'd at:**
+  ```plaintext
+  ==13456==  Block was alloc'd at
+  ==13456==    at 0x4885250: malloc (in /usr/libexec/valgrind/vgpreload_memcheck-arm64-linux.so)
+  ==13456==    by 0x4930CC7: getdelim (iogetdelim.c:65)
+  ==13456==    by 0x109E43: get_input (in /home/anuel/dev/revised_ss/simple_shell/shell)
+  ```
+  The memory in question was allocated by `getdelim()`, which is a function commonly used to read lines from a file or input stream.
+
+**Explanation:** This double-free error can occur if you call `free()` on the same pointer more than once, or if you attempt to free a pointer that points to a location in memory that was already freed or is being freed in another part of the program.
+
+**Solution:**
+- Ensure that each block of allocated memory is freed exactly once.
+- Set pointers to `NULL` after freeing them to avoid accidental double frees.
+- Carefully manage the ownership of dynamically allocated memory across different parts of your program.
+
+### **3. Possible Causes in Your Code**
+Given the nature of the errors, some potential places in your code to investigate include:
+- Functions responsible for executing commands (`exec_external`), constructing paths (`_concatenate`), or checking file attributes (`is_executable`).
+- Memory allocations in these functions, especially those handling dynamic strings or command arguments.
+- Ensure that no pointer is freed more than once and that any allocated memory is either freed properly or handed off to another part of the code that will manage its lifetime.
+
+**Summary of Actions to Take:**
+1. **Initialize all allocated memory** before using it, especially strings that will be passed to system calls like `access`, `stat`, or `execve`.
+2. **Avoid double frees** by ensuring that each allocated block of memory is only freed once. Use tools like Valgrind to track memory allocations and frees.
+3. **Ensure proper memory management** across functions, especially when dealing with dynamically allocated memory in a custom shell.
+
+Addressing these issues should help eliminate the Valgrind errors and stabilize your shell's memory management.
